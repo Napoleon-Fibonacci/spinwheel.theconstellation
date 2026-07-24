@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Spin Wheel — Constellation</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk@5/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk@5/500.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk@5/600.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk@5/700.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/500.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/inter@5/600.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/400.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/500.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="stars-bg" aria-hidden="true"></div>
+
+<nav class="nav">
+  <div class="nav-mark">SPIN WHEEL <span class="nav-sub">— CONSTELLATION</span></div>
+  <a href="https://constellation.my.id" class="nav-cta">← Kembali</a>
+</nav>
+
+<main class="wrap">
+
+  <section class="wheel-section">
+    <div class="wheel-stage">
+      <div class="pointer" aria-hidden="true"></div>
+      <canvas id="wheelCanvas" width="600" height="600"></canvas>
+    </div>
+    <button id="spinBtn" class="spin-btn">PUTAR</button>
+    <div id="spinHint" class="spin-hint"></div>
+  </section>
+
+  <section class="panel-card">
+    <label for="optionInput">Tambah Opsi</label>
+    <div class="add-row">
+      <input type="text" id="optionInput" placeholder="Ketik nama opsi…" maxlength="60" />
+      <button id="addBtn" class="btn-secondary add-btn">Tambah</button>
+    </div>
+  </section>
+
+  <section class="panel-card">
+    <label>Opsi Aktif <span class="haze" id="activeCount"></span></label>
+    <div id="activeList" class="active-list"></div>
+    <button id="resetBtn" class="btn-ghost reset-btn">Reset Semua</button>
+  </section>
+
+  <section class="panel-card">
+    <div class="history-head">
+      <label>History</label>
+      <button id="clearHistoryBtn" class="clear-history-btn">Hapus History</button>
+    </div>
+    <div id="historyList" class="history-list">
+      <div class="empty">Belum ada hasil spin.</div>
+    </div>
+  </section>
+
+</main>
+
+<div id="resultModal" class="modal-overlay">
+  <div class="modal-card">
+    <div id="confettiBurst" class="confetti-burst" aria-hidden="true"></div>
+    <div class="modal-eyebrow">Hasil</div>
+    <div id="resultName" class="modal-name">—</div>
+    <button id="spinAgainBtn" class="btn-secondary">Putar Lagi</button>
+    <button id="closeModalBtn" class="btn-ghost">Tutup</button>
+  </div>
+</div>
+
+<audio id="tickSound" src="sounds/tick.mp3" preload="auto"></audio>
+<audio id="stopSound" src="sounds/stop.mp3" preload="auto"></audio>
+
+<script src="script.js"></script>
+</body>
+</html>
