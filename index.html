@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta name="viewport" id="viewportMeta" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
 <title>Spin Wheel — Constellation</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/space-grotesk@5/400.css">
@@ -25,40 +25,92 @@
   <a href="https://constellation.my.id" class="nav-cta">← Kembali</a>
 </nav>
 
-<main class="wrap">
+<main class="wrap wrap-wide">
 
-  <section class="wheel-section">
-    <div class="wheel-stage">
-      <div class="pointer" aria-hidden="true"></div>
-      <canvas id="wheelCanvas" width="600" height="600"></canvas>
-    </div>
-    <button id="spinBtn" class="spin-btn">PUTAR</button>
-    <div id="spinHint" class="spin-hint"></div>
-  </section>
+  <div class="add-wheel-row">
+    <button class="btn-ghost add-wheel-btn" id="addWheelBtn">+ Tambah Wheel</button>
+  </div>
 
-  <section class="panel-card">
-    <label for="optionInput">Tambah Opsi</label>
-    <div class="add-row">
-      <input type="text" id="optionInput" placeholder="Ketik nama opsi…" maxlength="60" />
-      <button id="addBtn" class="btn-secondary add-btn">Tambah</button>
-    </div>
-  </section>
+  <div class="wheels-grid">
 
-  <section class="panel-card">
-    <label>Opsi Aktif <span class="haze" id="activeCount"></span></label>
-    <div id="activeList" class="active-list"></div>
-    <button id="resetBtn" class="btn-ghost reset-btn">Reset Semua</button>
-  </section>
+    <div class="wheel-column" id="wheelCol0" data-wheel="0">
+      <div class="wheel-col-label">Wheel 1</div>
 
-  <section class="panel-card">
-    <div class="history-head">
-      <label>History</label>
-      <button id="clearHistoryBtn" class="clear-history-btn">Hapus History</button>
+      <section class="wheel-section">
+        <div class="wheel-stage">
+          <div class="pointer" aria-hidden="true"></div>
+          <canvas class="wheelCanvas" width="600" height="600"></canvas>
+        </div>
+        <button class="spin-btn spinBtn">PUTAR</button>
+        <div class="spin-hint spinHint"></div>
+      </section>
+
+      <section class="panel-card">
+        <label>Tambah Opsi</label>
+        <div class="add-row">
+          <input type="text" class="optionInput" placeholder="Ketik nama opsi…" maxlength="60" />
+          <button class="btn-secondary add-btn addBtn">Tambah</button>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <label>Opsi Aktif <span class="haze activeCount"></span></label>
+        <div class="active-list activeList"></div>
+        <button class="btn-ghost reset-btn resetBtn">Reset Semua</button>
+      </section>
+
+      <section class="panel-card">
+        <div class="history-head">
+          <label>History</label>
+          <button class="clear-history-btn clearHistoryBtn">Hapus History</button>
+        </div>
+        <div class="history-list historyList">
+          <div class="empty">Belum ada hasil spin.</div>
+        </div>
+      </section>
     </div>
-    <div id="historyList" class="history-list">
-      <div class="empty">Belum ada hasil spin.</div>
+
+    <div class="wheel-column" id="wheelCol1" data-wheel="1" hidden>
+      <div class="wheel-col-label-row">
+        <div class="wheel-col-label">Wheel 2</div>
+        <button class="remove-wheel-btn" id="removeWheelBtn">✕ Hapus Wheel</button>
+      </div>
+
+      <section class="wheel-section">
+        <div class="wheel-stage">
+          <div class="pointer" aria-hidden="true"></div>
+          <canvas class="wheelCanvas" width="600" height="600"></canvas>
+        </div>
+        <button class="spin-btn spinBtn">PUTAR</button>
+        <div class="spin-hint spinHint"></div>
+      </section>
+
+      <section class="panel-card">
+        <label>Tambah Opsi</label>
+        <div class="add-row">
+          <input type="text" class="optionInput" placeholder="Ketik nama opsi…" maxlength="60" />
+          <button class="btn-secondary add-btn addBtn">Tambah</button>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <label>Opsi Aktif <span class="haze activeCount"></span></label>
+        <div class="active-list activeList"></div>
+        <button class="btn-ghost reset-btn resetBtn">Reset Semua</button>
+      </section>
+
+      <section class="panel-card">
+        <div class="history-head">
+          <label>History</label>
+          <button class="clear-history-btn clearHistoryBtn">Hapus History</button>
+        </div>
+        <div class="history-list historyList">
+          <div class="empty">Belum ada hasil spin.</div>
+        </div>
+      </section>
     </div>
-  </section>
+
+  </div>
 
 </main>
 
