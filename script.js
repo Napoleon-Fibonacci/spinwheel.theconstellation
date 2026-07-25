@@ -2,139 +2,157 @@
   'use strict';
 
   // ---------- Constants ----------
-  const STORAGE_KEYS = {
-    master: 'spinwheel_master_list',
-    active: 'spinwheel_active_options',
-    history: 'spinwheel_history'
-  };
-  const SHADES = ['#111833', '#1E2A52', '#3D4A7A', '#182248', '#293868', '#4E5D95']; // deep→dusk family, more variety
+  function storageKeys(i){
+    return {
+      master: 'spinwheel_master_list_' + i,
+      active: 'spinwheel_active_options_' + i,
+      history: 'spinwheel_history_' + i
+    };
+  }
+  const WHEEL_COUNT_KEY = 'spinwheel_wheel_count';
+  const MOBILE_BREAKPOINT = 768; // 2-wheel mode is tablet/desktop only
+  const SHADES = ['#111833', '#1E2A52', '#3D4A7A', '#182248', '#293868', '#4E5D95'];
   const STAR = '#EDEFF7';
   const MIN_SPIN_TURNS = 5;
   const MAX_SPIN_TURNS = 8;
   const SPIN_DURATION_MS = 5000;
+  const FRAME_INTERVAL = 1000/60;
 
-  // ---------- DOM refs ----------
-  const canvas = document.getElementById('wheelCanvas');
-  const ctx = canvas.getContext('2d');
-  const spinBtn = document.getElementById('spinBtn');
-  const spinHint = document.getElementById('spinHint');
-  const optionInput = document.getElementById('optionInput');
-  const addBtn = document.getElementById('addBtn');
-  const resetBtn = document.getElementById('resetBtn');
-  const activeList = document.getElementById('activeList');
-  const activeCount = document.getElementById('activeCount');
-  const historyList = document.getElementById('historyList');
+  // ---------- Global DOM refs ----------
+  const addWheelBtn = document.getElementById('addWheelBtn');
+  const removeWheelBtn = document.getElementById('removeWheelBtn');
+  const wheelsGrid = document.querySelector('.wheels-grid');
+  const viewportMeta = document.getElementById('viewportMeta');
+  const wheelCols = [document.getElementById('wheelCol0'), document.getElementById('wheelCol1')];
   const resultModal = document.getElementById('resultModal');
   const resultName = document.getElementById('resultName');
   const spinAgainBtn = document.getElementById('spinAgainBtn');
   const closeModalBtn = document.getElementById('closeModalBtn');
-  const clearHistoryBtn = document.getElementById('clearHistoryBtn');
   const confettiBurst = document.getElementById('confettiBurst');
   const tickSound = document.getElementById('tickSound');
   const stopSound = document.getElementById('stopSound');
 
-  // ---------- Canvas sizing (match actual display size incl. DPR) ----------
-  let wheelSize = 600; // logical drawing size in CSS px, kept square
-  function resizeCanvas(){
-    const displaySize = canvas.clientWidth || canvas.parentElement.clientWidth;
-    if(!displaySize) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    wheelSize = displaySize;
-    canvas.width = Math.round(displaySize * dpr);
-    canvas.height = Math.round(displaySize * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawWheel();
-  }
-  window.addEventListener('resize', resizeCanvas);
-
-  // ---------- State ----------
-  let masterList = [];
-  let activeOptions = [];
-  let history = [];
-  let currentRotation = 0; // radians
-  let isSpinning = false;
-  let lastTickSliceIndex = -1;
-
   // ---------- Storage helpers (fail-safe) ----------
   function safeGet(key){
-    try{
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : null;
-    } catch(e){ return null; }
+    try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }
+    catch(e){ return null; }
   }
   function safeSet(key, value){
-    try{ localStorage.setItem(key, JSON.stringify(value)); } catch(e){ /* ignore, no persistence this session */ }
+    try{ localStorage.setItem(key, JSON.stringify(value)); } catch(e){ /* ignore */ }
   }
   function safeRemove(key){
     try{ localStorage.removeItem(key); } catch(e){ /* ignore */ }
   }
 
-  // ---------- Init ----------
-  function init(){
-    const storedMaster = safeGet(STORAGE_KEYS.master);
-    const storedActive = safeGet(STORAGE_KEYS.active);
-    const storedHistory = safeGet(STORAGE_KEYS.history);
+  // ---------- Per-wheel state + per-wheel DOM refs ----------
+  let wheelCount = 1;
+  let lastWinnerWheel = 0; // which wheel's result the modal is currently showing
 
-    if(storedMaster && storedMaster.length){
-      masterList = storedMaster;
-      activeOptions = storedActive && storedActive.length ? storedActive : [...masterList];
-      history = storedHistory || [];
+  const W = [0, 1].map(i => {
+    const col = wheelCols[i];
+    return {
+      i,
+      col,
+      canvas: col.querySelector('.wheelCanvas'),
+      ctx: null,
+      spinBtn: col.querySelector('.spinBtn'),
+      spinHint: col.querySelector('.spinHint'),
+      optionInput: col.querySelector('.optionInput'),
+      addBtn: col.querySelector('.addBtn'),
+      resetBtn: col.querySelector('.resetBtn'),
+      activeList: col.querySelector('.activeList'),
+      activeCount: col.querySelector('.activeCount'),
+      historyList: col.querySelector('.historyList'),
+      clearHistoryBtn: col.querySelector('.clearHistoryBtn'),
+      master: [], active: [], history: [],
+      rotation: 0,
+      isSpinning: false,
+      lastTickSliceIndex: -1,
+      wheelSize: 600,
+      labelCache: { key: '', labels: [] }
+    };
+  });
+  W.forEach(w => { w.ctx = w.canvas.getContext('2d'); });
+
+  // ---------- Canvas sizing ----------
+  function resizeCanvas(w){
+    const displaySize = w.canvas.clientWidth || w.canvas.parentElement.clientWidth;
+    if(!displaySize) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w.wheelSize = displaySize;
+    w.canvas.width = Math.round(displaySize * dpr);
+    w.canvas.height = Math.round(displaySize * dpr);
+    w.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawWheel(w);
+  }
+  function applyResponsiveVisibility(){
+    const showSecond = wheelCount >= 2 && !isMobile();
+    wheelCols[1].hidden = !showSecond;
+    addWheelBtn.hidden = showSecond || isMobile();
+    updateGridLayout();
+    updateZoomLock();
+    if(showSecond) resizeCanvas(W[1]);
+  }
+
+  window.addEventListener('resize', ()=>{
+    applyResponsiveVisibility();
+    W.forEach(w => { if(!w.col.hidden) resizeCanvas(w); });
+  });
+
+  function isMobile(){
+    return window.innerWidth < MOBILE_BREAKPOINT;
+  }
+
+  function effectiveWheelCount(){
+    return (wheelCount >= 2 && !isMobile()) ? 2 : 1;
+  }
+
+  function updateGridLayout(){
+    wheelsGrid.classList.toggle('single', effectiveWheelCount() === 1);
+  }
+
+  function updateZoomLock(){
+    if(effectiveWheelCount() >= 2){
+      viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=5, user-scalable=yes');
     } else {
-      masterList = [];
-      activeOptions = [];
-      history = [];
+      viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no');
     }
+  }
 
-    resizeCanvas();
-    renderActiveList();
-    renderHistory();
-    updateSpinBtnState();
+  // ---------- Init ----------
+  function loadWheel(w){
+    const keys = storageKeys(w.i);
+    const storedMaster = safeGet(keys.master);
+    const storedActive = safeGet(keys.active);
+    const storedHistory = safeGet(keys.history);
+    if(storedMaster && storedMaster.length){
+      w.master = storedMaster;
+      w.active = storedActive && storedActive.length ? storedActive : [...storedMaster];
+      w.history = storedHistory || [];
+    }
+  }
+
+  function init(){
+    loadWheel(W[0]);
+    loadWheel(W[1]);
+    wheelCount = (safeGet(WHEEL_COUNT_KEY) === 2) ? 2 : 1;
+    applyResponsiveVisibility();
+
+    W.forEach(w => {
+      if(w.col.hidden) return;
+      resizeCanvas(w);
+      renderActiveList(w);
+      renderHistory(w);
+      updateSpinBtnState(w);
+    });
   }
 
   // ---------- Render ----------
-  function renderAll(){
-    renderActiveList();
-    renderHistory();
-    drawWheel();
-    updateSpinBtnState();
-  }
-
-  function renderActiveList(){
-    activeCount.textContent = `(${activeOptions.length})`;
-    if(activeOptions.length === 0){
-      activeList.innerHTML = '<div class="empty">Belum ada opsi aktif.</div>';
-      return;
-    }
-    activeList.innerHTML = '';
-    activeOptions.forEach((opt, i)=>{
-      const row = document.createElement('div');
-      row.className = 'active-item';
-      row.innerHTML = `<span class="txt">${escapeHtml(opt)}</span><button class="remove-btn" data-i="${i}">✕</button>`;
-      activeList.appendChild(row);
-    });
-    activeList.querySelectorAll('.remove-btn').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        if(isSpinning) return;
-        const idx = parseInt(btn.dataset.i, 10);
-        activeOptions.splice(idx, 1);
-        safeSet(STORAGE_KEYS.active, activeOptions);
-        renderAll();
-      });
-    });
-  }
-
-  function renderHistory(){
-    if(history.length === 0){
-      historyList.innerHTML = '<div class="empty">Belum ada hasil spin.</div>';
-      return;
-    }
-    historyList.innerHTML = '';
-    history.forEach((h, i)=>{
-      const row = document.createElement('div');
-      row.className = 'history-item';
-      row.innerHTML = `<span class="txt">${escapeHtml(h)}</span><span class="num">#${i+1}</span>`;
-      historyList.appendChild(row);
-    });
+  function renderAll(w){
+    renderActiveList(w);
+    renderHistory(w);
+    drawWheel(w);
+    updateSpinBtnState(w);
   }
 
   function escapeHtml(str){
@@ -143,87 +161,61 @@
     return div.innerHTML;
   }
 
-  function updateSpinBtnState(){
-    const enough = activeOptions.length >= 2;
-    spinBtn.disabled = !enough || isSpinning;
-    spinHint.textContent = enough ? '' : 'Minimal 2 opsi untuk memutar wheel.';
-  }
-
-  let labelCache = { key: '', labels: [] };
-  function getCachedLabels(){
-    const key = wheelSize + '|' + activeOptions.join('\u0001');
-    if(labelCache.key === key) return labelCache.labels;
-    const n = activeOptions.length;
-    const size = wheelSize;
-    const r = size/2 - 4;
-    const sliceAngle = (Math.PI*2) / n;
-    const fontSize = n <= 3 ? 32 : n <= 6 ? 24 : n <= 10 ? 18 : n <= 16 ? 14 : n <= 24 ? 11 : 9;
-    const maxLabelWidth = r - 40;
-    const labels = activeOptions.map(opt => truncateLabel(opt, maxLabelWidth, ctx, fontSize));
-    labelCache = { key, labels };
-    return labels;
-  }
-
-  // ---------- Wheel drawing ----------
-  function drawWheel(){
-    const size = wheelSize;
-    const cx = size/2, cy = size/2, r = size/2 - 4;
-    ctx.clearRect(0,0,size,size);
-
-    if(activeOptions.length === 0){
-      ctx.fillStyle = SHADES[0];
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI*2);
-      ctx.fill();
-      ctx.fillStyle = STAR;
-      ctx.font = "600 16px 'Space Grotesk', sans-serif";
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('Tidak ada opsi', cx, cy);
+  function renderActiveList(w){
+    w.activeCount.textContent = `(${w.active.length})`;
+    if(w.active.length === 0){
+      w.activeList.innerHTML = '<div class="empty">Belum ada opsi aktif.</div>';
       return;
     }
+    w.activeList.innerHTML = '';
+    w.active.forEach((opt, idx)=>{
+      const row = document.createElement('div');
+      row.className = 'active-item';
+      row.innerHTML = `<span class="txt">${escapeHtml(opt)}</span><button class="remove-btn" data-i="${idx}">✕</button>`;
+      w.activeList.appendChild(row);
+    });
+    w.activeList.querySelectorAll('.remove-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        if(w.isSpinning) return;
+        const idx = parseInt(btn.dataset.i, 10);
+        w.active.splice(idx, 1);
+        safeSet(storageKeys(w.i).active, w.active);
+        renderAll(w);
+      });
+    });
+  }
 
-    const n = activeOptions.length;
-    const sliceAngle = (Math.PI*2) / n;
-    const fontSize = n <= 3 ? 32 : n <= 6 ? 24 : n <= 10 ? 18 : n <= 16 ? 14 : n <= 24 ? 11 : 9;
-    const halfAngle = sliceAngle/2;
-    const labelRadius = r * (2/3) * (Math.sin(halfAngle)/halfAngle);
-    const labels = getCachedLabels();
-
-    for(let i=0; i<n; i++){
-      const start = currentRotation + i*sliceAngle;
-      const end = start + sliceAngle;
-
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, r, start, end);
-      ctx.closePath();
-      let shadeIdx = i % SHADES.length;
-      if(i === n-1 && shadeIdx === 0 && n % SHADES.length === 0) shadeIdx = 1;
-      ctx.fillStyle = SHADES[shadeIdx];
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(237,239,247,0.18)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // label — centered radially within the slice, rotated to follow slice angle
-      const mid = start + sliceAngle/2;
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(mid);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = STAR;
-      ctx.font = `600 ${fontSize}px 'Inter', sans-serif`;
-      ctx.fillText(labels[i], labelRadius, 0);
-      ctx.restore();
+  function renderHistory(w){
+    if(w.history.length === 0){
+      w.historyList.innerHTML = '<div class="empty">Belum ada hasil spin.</div>';
+      return;
     }
+    w.historyList.innerHTML = '';
+    w.history.forEach((h, idx)=>{
+      const row = document.createElement('div');
+      row.className = 'history-item';
+      row.innerHTML = `<span class="txt">${escapeHtml(h)}</span><span class="num">#${idx+1}</span>`;
+      w.historyList.appendChild(row);
+    });
+  }
 
-    // center hub
-    ctx.beginPath();
-    ctx.arc(cx, cy, 10, 0, Math.PI*2);
-    ctx.fillStyle = STAR;
-    ctx.fill();
+  function updateSpinBtnState(w){
+    const enough = w.active.length >= 2;
+    w.spinBtn.disabled = !enough || w.isSpinning;
+    w.spinHint.textContent = enough ? '' : 'Minimal 2 opsi untuk memutar wheel.';
+  }
+
+  // ---------- Label cache + drawing ----------
+  function getCachedLabels(w){
+    const key = w.wheelSize + '|' + w.active.join('\u0001');
+    if(w.labelCache.key === key) return w.labelCache.labels;
+    const n = w.active.length;
+    const r = w.wheelSize/2 - 4;
+    const fontSize = n <= 3 ? 32 : n <= 6 ? 24 : n <= 10 ? 18 : n <= 16 ? 14 : n <= 24 ? 11 : 9;
+    const maxLabelWidth = r - 40;
+    const labels = w.active.map(opt => truncateLabel(opt, maxLabelWidth, w.ctx, fontSize));
+    w.labelCache = { key, labels };
+    return labels;
   }
 
   function truncateLabel(text, maxWidth, context, fontSize){
@@ -236,25 +228,94 @@
     return truncated + '…';
   }
 
-  // ---------- Spin logic ----------
-  function spin(){
-    if(isSpinning || activeOptions.length < 2) return;
-    isSpinning = true;
-    updateSpinBtnState();
+  function drawWheel(w){
+    const ctx = w.ctx;
+    const size = w.wheelSize;
+    const cx = size/2, cy = size/2, r = size/2 - 4;
+    ctx.clearRect(0,0,size,size);
 
-    const n = activeOptions.length;
+    if(w.active.length === 0){
+      ctx.fillStyle = SHADES[0];
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = STAR;
+      ctx.font = "600 16px 'Space Grotesk', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Tidak ada opsi', cx, cy);
+      return;
+    }
+
+    const n = w.active.length;
     const sliceAngle = (Math.PI*2) / n;
+    const fontSize = n <= 3 ? 32 : n <= 6 ? 24 : n <= 10 ? 18 : n <= 16 ? 14 : n <= 24 ? 11 : 9;
+    const halfAngle = sliceAngle/2;
+    const labelRadius = r * (2/3) * (Math.sin(halfAngle)/halfAngle);
+    const labels = getCachedLabels(w);
 
+    for(let idx=0; idx<n; idx++){
+      const start = w.rotation + idx*sliceAngle;
+      const end = start + sliceAngle;
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, start, end);
+      ctx.closePath();
+      let shadeIdx = idx % SHADES.length;
+      if(idx === n-1 && shadeIdx === 0 && n % SHADES.length === 0) shadeIdx = 1;
+      ctx.fillStyle = SHADES[shadeIdx];
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(237,239,247,0.18)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const mid = start + sliceAngle/2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(mid);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = STAR;
+      ctx.font = `600 ${fontSize}px 'Inter', sans-serif`;
+      ctx.fillText(labels[idx], labelRadius, 0);
+      ctx.restore();
+    }
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 10, 0, Math.PI*2);
+    ctx.fillStyle = STAR;
+    ctx.fill();
+  }
+
+  function normalizeAngle(a){
+    const twoPi = Math.PI*2;
+    return ((a % twoPi) + twoPi) % twoPi;
+  }
+
+  function playSound(el){
+    try{
+      el.currentTime = 0;
+      const p = el.play();
+      if(p && p.catch) p.catch(()=>{});
+    } catch(e){ /* fail-safe */ }
+  }
+
+  // ---------- Spin logic (independent per wheel) ----------
+  function spin(w){
+    if(w.isSpinning || w.active.length < 2) return;
+    w.isSpinning = true;
+    updateSpinBtnState(w);
+
+    const n = w.active.length;
+    const sliceAngle = (Math.PI*2) / n;
     const turns = MIN_SPIN_TURNS + Math.random()*(MAX_SPIN_TURNS - MIN_SPIN_TURNS);
     const randomOffset = Math.random() * Math.PI*2;
     const totalRotation = turns * Math.PI*2 + randomOffset;
-
-    const startRotation = currentRotation;
-    const targetRotation = startRotation + totalRotation;
+    const startRotation = w.rotation;
     const startTime = performance.now();
-    lastTickSliceIndex = -1;
+    w.lastTickSliceIndex = -1;
     let lastFrameTime = 0;
-    const FRAME_INTERVAL = 1000/60; // ponytail: simple delta-throttle, good enough vs a full frame scheduler
 
     function easeOutQuint(t){ return 1 - Math.pow(1-t, 5); }
 
@@ -267,60 +328,52 @@
       const elapsed = now - startTime;
       const t = Math.min(1, elapsed / SPIN_DURATION_MS);
       const eased = easeOutQuint(t);
-      currentRotation = startRotation + totalRotation*eased;
+      w.rotation = startRotation + totalRotation*eased;
 
-      drawWheel();
-      maybePlayTick(sliceAngle);
+      drawWheel(w);
+      maybePlayTick(w, sliceAngle);
 
       if(t < 1){
         requestAnimationFrame(frame);
       } else {
-        currentRotation = normalizeAngle(startRotation + totalRotation);
-        drawWheel();
-        finishSpin();
+        w.rotation = normalizeAngle(startRotation + totalRotation);
+        drawWheel(w);
+        finishSpin(w);
       }
     }
     requestAnimationFrame(frame);
   }
 
-  function normalizeAngle(a){
-    const twoPi = Math.PI*2;
-    return ((a % twoPi) + twoPi) % twoPi;
-  }
-
-  function maybePlayTick(sliceAngle){
-    // pointer at top = angle -PI/2 in canvas space (0 = 3 o'clock, clockwise)
-    const pointerAngle = normalizeAngle(-Math.PI/2 - currentRotation);
+  function maybePlayTick(w, sliceAngle){
+    const pointerAngle = normalizeAngle(-Math.PI/2 - w.rotation);
     const sliceIndex = Math.floor(pointerAngle / sliceAngle);
-    if(sliceIndex !== lastTickSliceIndex){
-      lastTickSliceIndex = sliceIndex;
+    if(sliceIndex !== w.lastTickSliceIndex){
+      w.lastTickSliceIndex = sliceIndex;
       playSound(tickSound);
     }
   }
 
-  function playSound(el){
-    try{
-      el.currentTime = 0;
-      const p = el.play();
-      if(p && p.catch) p.catch(()=>{ /* autoplay blocked or file missing, ignore */ });
-    } catch(e){ /* fail-safe: animation continues without sound */ }
-  }
-
-  function finishSpin(){
+  function finishSpin(w){
     playSound(stopSound);
-    const n = activeOptions.length;
+    const n = w.active.length;
     const sliceAngle = (Math.PI*2) / n;
-    const pointerAngle = normalizeAngle(-Math.PI/2 - currentRotation);
+    const pointerAngle = normalizeAngle(-Math.PI/2 - w.rotation);
     const winnerIndex = Math.floor(pointerAngle / sliceAngle) % n;
-    const winner = activeOptions[winnerIndex];
+    const winner = w.active[winnerIndex];
 
-    history.push(winner);
-    safeSet(STORAGE_KEYS.history, history);
-    renderHistory();
+    w.history.push(winner);
+    safeSet(storageKeys(w.i).history, w.history);
+    renderHistory(w);
 
-    isSpinning = false;
-    updateSpinBtnState();
+    w.active.splice(winnerIndex, 1);
+    safeSet(storageKeys(w.i).active, w.active);
+    renderActiveList(w);
+    drawWheel(w);
 
+    w.isSpinning = false;
+    updateSpinBtnState(w);
+
+    lastWinnerWheel = w.i;
     resultName.textContent = winner;
     spawnConfetti();
     resultModal.classList.add('show');
@@ -332,67 +385,109 @@
     if(reduceMotion) return;
     const colors = ['#EDEFF7', '#8891B5', '#3D4A7A'];
     const count = 18;
-    for(let i=0;i<count;i++){
+    for(let idx=0; idx<count; idx++){
       const p = document.createElement('div');
       p.className = 'confetti-piece';
-      const angle = (Math.PI*2 * i/count) + (Math.random()*0.5-0.25);
+      const angle = (Math.PI*2 * idx/count) + (Math.random()*0.5-0.25);
       const dist = 70 + Math.random()*50;
       p.style.setProperty('--dx', Math.cos(angle)*dist + 'px');
       p.style.setProperty('--dy', Math.sin(angle)*dist - 20 + 'px');
       p.style.setProperty('--rot', (Math.random()*360-180) + 'deg');
-      p.style.background = colors[i % colors.length];
+      p.style.background = colors[idx % colors.length];
       p.style.animationDelay = (Math.random()*0.08) + 's';
       confettiBurst.appendChild(p);
     }
   }
 
-  // ---------- Events ----------
-  spinBtn.addEventListener('click', spin);
-  canvas.addEventListener('click', spin);
+  // ---------- Wire per-wheel events ----------
+  W.forEach(w => {
+    w.spinBtn.addEventListener('click', ()=>spin(w));
+    w.canvas.addEventListener('click', ()=>spin(w));
 
-  function addOption(){
-    if(isSpinning) return;
-    const val = optionInput.value.trim();
-    if(!val) return;
-    masterList.push(val);
-    activeOptions.push(val);
-    safeSet(STORAGE_KEYS.master, masterList);
-    safeSet(STORAGE_KEYS.active, activeOptions);
-    optionInput.value = '';
-    optionInput.focus();
-    renderAll();
-  }
-  addBtn.addEventListener('click', addOption);
-  optionInput.addEventListener('keydown', (e)=>{
-    if(e.key === 'Enter'){ e.preventDefault(); addOption(); }
+    function addOption(){
+      if(w.isSpinning) return;
+      const val = w.optionInput.value.trim();
+      if(!val) return;
+      w.master.push(val);
+      w.active.push(val);
+      safeSet(storageKeys(w.i).master, w.master);
+      safeSet(storageKeys(w.i).active, w.active);
+      w.optionInput.value = '';
+      w.optionInput.focus();
+      renderAll(w);
+    }
+    w.addBtn.addEventListener('click', addOption);
+    w.optionInput.addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter'){ e.preventDefault(); addOption(); }
+    });
+
+    w.resetBtn.addEventListener('click', ()=>{
+      if(w.isSpinning) return;
+      if(!confirm('Reset semua? Semua opsi dan history akan dikosongkan.')) return;
+      w.master = [];
+      w.active = [];
+      w.history = [];
+      const keys = storageKeys(w.i);
+      safeSet(keys.master, w.master);
+      safeSet(keys.active, w.active);
+      safeRemove(keys.history);
+      w.rotation = 0;
+      renderAll(w);
+    });
+
+    w.clearHistoryBtn.addEventListener('click', ()=>{
+      if(w.history.length === 0) return;
+      if(!confirm('Hapus semua history hasil spin?')) return;
+      w.history = [];
+      safeRemove(storageKeys(w.i).history);
+      renderHistory(w);
+    });
   });
 
-  resetBtn.addEventListener('click', ()=>{
-    if(isSpinning) return;
-    if(!confirm('Reset semua? Semua opsi dan history akan dikosongkan.')) return;
-    masterList = [];
-    activeOptions = [];
-    history = [];
-    safeSet(STORAGE_KEYS.master, masterList);
-    safeSet(STORAGE_KEYS.active, activeOptions);
-    safeRemove(STORAGE_KEYS.history);
-    currentRotation = 0;
-    renderAll();
+  // ---------- Add second wheel ----------
+  addWheelBtn.addEventListener('click', ()=>{
+    if(wheelCount >= 2 || isMobile()) return;
+    wheelCount = 2;
+    safeSet(WHEEL_COUNT_KEY, 2);
+    wheelCols[1].hidden = false;
+    addWheelBtn.hidden = true;
+    updateGridLayout();
+    updateZoomLock();
+    const w1 = W[1];
+    resizeCanvas(w1);
+    renderActiveList(w1);
+    renderHistory(w1);
+    updateSpinBtnState(w1);
   });
 
+  // ---------- Remove second wheel ----------
+  removeWheelBtn.addEventListener('click', ()=>{
+    const w1 = W[1];
+    if(w1.isSpinning) return;
+    if(!confirm('Hapus Wheel 2? Semua opsi dan history di wheel ini akan hilang.')) return;
+    w1.master = [];
+    w1.active = [];
+    w1.history = [];
+    w1.rotation = 0;
+    const keys = storageKeys(1);
+    safeRemove(keys.master);
+    safeRemove(keys.active);
+    safeRemove(keys.history);
+    wheelCount = 1;
+    safeSet(WHEEL_COUNT_KEY, 1);
+    wheelCols[1].hidden = true;
+    addWheelBtn.hidden = false;
+    updateGridLayout();
+    updateZoomLock();
+  });
+
+  // ---------- Result modal ----------
   spinAgainBtn.addEventListener('click', ()=>{
     resultModal.classList.remove('show');
-    spin();
+    spin(W[lastWinnerWheel]);
   });
   closeModalBtn.addEventListener('click', ()=>{
     resultModal.classList.remove('show');
-  });
-  clearHistoryBtn.addEventListener('click', ()=>{
-    if(history.length === 0) return;
-    if(!confirm('Hapus semua history hasil spin?')) return;
-    history = [];
-    safeRemove(STORAGE_KEYS.history);
-    renderHistory();
   });
   resultModal.addEventListener('click', (e)=>{
     if(e.target === resultModal) resultModal.classList.remove('show');
@@ -401,6 +496,6 @@
   // ---------- Start ----------
   init();
   if(document.fonts && document.fonts.ready){
-    document.fonts.ready.then(drawWheel).catch(()=>{});
+    document.fonts.ready.then(()=>{ W.forEach(w => { if(!w.col.hidden) drawWheel(w); }); }).catch(()=>{});
   }
 })();
